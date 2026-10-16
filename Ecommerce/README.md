@@ -54,6 +54,7 @@ POST http://localhost:3000/api/pedidos
 
 
 ## base de datos
+'''text
 DB_ROOT_PASSWORD=1234
 DB_USER=giganet
 DB_PASSWORD=1234
