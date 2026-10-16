@@ -73,6 +73,10 @@ docker run -d -p 1025:1025 -p 8025:8025 axllent/mailpit
 
 Corre dos procesos: node src/app.js (la API) y npm run worker.
 
+##Instala los iconos
+npm i lucide-react
+
+
 
 
 **Conclusión:** los módulos están separados en código, pero pertenecen al mismo proceso y al mismo despliegue.
