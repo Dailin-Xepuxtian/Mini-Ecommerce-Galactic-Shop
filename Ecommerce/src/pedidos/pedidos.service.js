@@ -9,17 +9,19 @@ const { numeroOrden } = require('../common/formato');
 const productosService = require('../productos/productos.service');
 const queues = require('../queues/queues');
 const trabajos = require('../queues/trabajos.service');
+const inventario = require('../pagos/inventario');
 
 // Flujo permitido de estados
+// 'pendiente -> confirmado' lo hace el worker cuando el pago en línea se aprueba
 const TRANSICIONES = {
-  pendiente: ['confirmado', 'cancelado'],
+  pendiente: ['cancelado'],
   confirmado: ['enviado', 'cancelado'],
   enviado: ['entregado'],
   entregado: [],
   cancelado: [],
 };
 
-const SELECT_PEDIDO = `SELECT p.id_pedido, p.id_usuario, p.estado, p.total, p.observaciones, p.pdf_archivo,
+const SELECT_PEDIDO = `SELECT p.id_pedido, p.id_usuario, p.estado, p.estado_pago, p.pagado_en, p.total, p.observaciones, p.pdf_archivo,
                               p.creado_en, p.actualizado_en, u.nombres, u.apellidos, u.email
                        FROM pedidos p
                        INNER JOIN usuarios u ON u.id_usuario = p.id_usuario`;
@@ -34,7 +36,9 @@ function pedidoResponse(p, items = null) {
     estado: p.estado,
     total: Number(p.total),
     observaciones: p.observaciones,
-    tiene_pdf: Boolean(p.pdf_archivo),
+    tiene_pdf: Boolean(p.pdf_archivo), // orden de compra: se genera cuando el pago se aprueba
+    estado_pago: p.estado_pago,
+    pagado_en: p.pagado_en,
     creado_en: p.creado_en,
     actualizado_en: p.actualizado_en,
     cliente: { id: Number(p.id_usuario), nombre: `${p.nombres} ${p.apellidos}`.trim(), email: p.email },
@@ -72,7 +76,16 @@ async function cargarConPermiso(user, id) {
 }
 
 async function detalle(pedido) {
-  return { ...pedidoResponse(pedido, pedido.items), trabajos: await trabajos.listarPorPedido(pedido.id_pedido) };
+  const [pagos] = await pool.execute(
+    `SELECT id_pago, metodo, monto, estado, referencia, motivo, creado_en
+     FROM pedido_pagos WHERE id_pedido = ? ORDER BY id_pago DESC`,
+    [pedido.id_pedido]
+  );
+  return {
+    ...pedidoResponse(pedido, pedido.items),
+    pagos: pagos.map((x) => ({ ...x, id_pago: Number(x.id_pago), monto: Number(x.monto) })),
+    trabajos: await trabajos.listarPorPedido(pedido.id_pedido),
+  };
 }
 
 /**
@@ -129,15 +142,6 @@ async function insertarDetalle(conn, idPedido, lineas) {
   );
 }
 
-/** El pedido ya está guardado: si Redis falla no se pierde, el trabajo queda registrado como fallido. */
-async function intentarEncolarPdf(idPedido, motivo) {
-  try {
-    await queues.encolarPdf(idPedido, motivo);
-  } catch (e) {
-    console.error(`No se pudo encolar el PDF del pedido ${idPedido}:`, e.message);
-  }
-}
-
 // ---------------- casos de uso ----------------
 async function crear(user, { items, observaciones }) {
   const { lineas, totalCent } = await prepararLineas(items);
@@ -151,7 +155,7 @@ async function crear(user, { items, observaciones }) {
     return r.insertId;
   });
 
-  await intentarEncolarPdf(idPedido, 'creada'); // -> PDF -> correo
+  // La orden de compra (PDF + correo) se genera cuando el pago en línea se aprueba (ver pagos.service)
   return detalle(await obtenerPedidoCompleto(idPedido));
 }
 
@@ -188,6 +192,9 @@ async function actualizar(user, id, { items, observaciones }) {
   if (actual.estado !== 'pendiente') {
     throw new HttpError(409, 'CONFLICT', 'Solo se pueden modificar pedidos pendientes');
   }
+  if (actual.estado_pago === 'procesando') {
+    throw new HttpError(409, 'CONFLICT', 'El pago se está procesando; espera a que termine para modificar el pedido');
+  }
   const { lineas, totalCent } = await prepararLineas(items);
 
   await withTransaction(async (conn) => {
@@ -200,21 +207,37 @@ async function actualizar(user, id, { items, observaciones }) {
     await insertarDetalle(conn, id, lineas);
   });
 
-  await intentarEncolarPdf(id, 'actualizada'); // el PDF cambió: se regenera y se reenvía
   return detalle(await obtenerPedidoCompleto(id));
 }
 
 async function cambiarEstado(id, nuevo) {
-  const [rows] = await pool.execute('SELECT estado FROM pedidos WHERE id_pedido = ?', [id]);
+  const [rows] = await pool.execute('SELECT estado, estado_pago FROM pedidos WHERE id_pedido = ?', [id]);
   if (!rows.length) throw noEncontrado();
 
-  const actual = rows[0].estado;
+  const { estado: actual, estado_pago: pago } = rows[0];
   if (!TRANSICIONES[actual].includes(nuevo)) {
     throw new HttpError(409, 'CONFLICT', `No se puede pasar de '${actual}' a '${nuevo}'`);
   }
-  // WHERE estado = actual evita pisarse con otro cambio simultáneo
-  const [r] = await pool.execute('UPDATE pedidos SET estado = ? WHERE id_pedido = ? AND estado = ?', [nuevo, id, actual]);
-  if (r.affectedRows !== 1) throw new HttpError(409, 'CONFLICT', 'El pedido cambió de estado, intenta de nuevo');
+  if (pago === 'procesando') {
+    throw new HttpError(409, 'CONFLICT', 'El pago de este pedido se está procesando, intenta en unos segundos');
+  }
+  // Regla de negocio: nada sale de la bodega sin pago aprobado
+  if (nuevo === 'enviado' && pago !== 'aprobado') {
+    throw new HttpError(409, 'CONFLICT', 'No se puede enviar un pedido sin pago aprobado');
+  }
+
+  await withTransaction(async (conn) => {
+    // WHERE estado = actual evita pisarse con otro cambio simultáneo
+    const [r] = await conn.execute('UPDATE pedidos SET estado = ? WHERE id_pedido = ? AND estado = ?', [nuevo, id, actual]);
+    if (r.affectedRows !== 1) throw new HttpError(409, 'CONFLICT', 'El pedido cambió de estado, intenta de nuevo');
+
+    // Cancelar un pedido ya pagado: reembolso simulado + se devuelve el stock
+    if (nuevo === 'cancelado' && pago === 'aprobado') {
+      await inventario.reponer(conn, id);
+      await conn.execute("UPDATE pedidos SET estado_pago = 'reembolsado' WHERE id_pedido = ?", [id]);
+      await conn.execute("UPDATE pedido_pagos SET estado = 'reembolsado' WHERE id_pedido = ? AND estado = 'aprobado'", [id]);
+    }
+  });
 
   return detalle(await obtenerPedidoCompleto(id));
 }
@@ -223,6 +246,9 @@ async function eliminar(user, id) {
   const pedido = await cargarConPermiso(user, id);
   if (pedido.estado !== 'pendiente') {
     throw new HttpError(409, 'CONFLICT', 'Solo se pueden eliminar pedidos pendientes; usa el cambio de estado para cancelar');
+  }
+  if (pedido.estado_pago === 'procesando') {
+    throw new HttpError(409, 'CONFLICT', 'El pago se está procesando; espera a que termine para eliminar el pedido');
   }
   const [r] = await pool.execute("DELETE FROM pedidos WHERE id_pedido = ? AND estado = 'pendiente'", [id]);
   if (r.affectedRows !== 1) throw new HttpError(409, 'CONFLICT', 'El pedido cambió de estado, intenta de nuevo');
@@ -235,9 +261,12 @@ async function listarTrabajos(user, id) {
   return trabajos.listarPorPedido(id);
 }
 
-/** Vuelve a generar el PDF y reenviar el correo (por ejemplo, tras un trabajo fallido). */
+/** Vuelve a generar el PDF y reenviar el correo (por ejemplo, tras un trabajo fallido). Solo con pago aprobado. */
 async function reenviar(user, id) {
-  await cargarConPermiso(user, id);
+  const pedido = await cargarConPermiso(user, id);
+  if (pedido.estado_pago !== 'aprobado') {
+    throw new HttpError(409, 'CONFLICT', 'La orden de compra se genera cuando el pago está aprobado');
+  }
   try {
     const jobId = await queues.encolarPdf(id, 'reenvio');
     return { mensaje: 'Generación de la orden de compra encolada', job_id: jobId, cola: queues.NOMBRES.PDF };
@@ -269,3 +298,4 @@ module.exports = {
   rutaPdf,
   obtenerPedidoCompleto,
 };
+

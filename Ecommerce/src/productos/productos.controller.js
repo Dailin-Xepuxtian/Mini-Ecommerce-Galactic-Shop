@@ -2,8 +2,7 @@ const { z } = require('zod');
 const { HttpError } = require('../common/errors');
 const service = require('./productos.service');
 
-// Validación equivalente a la del PHP: id_categoria entero positivo (opcional),
-// codigo texto recortado a 50 caracteres (busca por código y por nombre).
+// (busca por código y por nombre).
 const listarQuery = z.object({
   id_categoria: z.preprocess(
     (v) => (v === '' ? undefined : v),

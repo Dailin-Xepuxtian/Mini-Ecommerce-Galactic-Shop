@@ -2,7 +2,7 @@ const { z } = require('zod');
 const { validar } = require('../common/validate');
 const service = require('./auth.service');
 
-// Si el valor no es string se trata como vacío, para dar el mismo mensaje que el PHP
+// Si el valor no es string se trata como vacío
 const texto = (v) => (typeof v === 'string' ? v : '');
 
 const loginSchema = z.object({

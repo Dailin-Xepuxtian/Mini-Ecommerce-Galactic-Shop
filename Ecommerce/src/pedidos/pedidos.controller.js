@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const { validar, entero, parseId } = require('../common/validate');
 const service = require('./pedidos.service');
+const pagosService = require('../pagos/pagos.service');
 
 const ESTADOS = ['pendiente', 'confirmado', 'enviado', 'entregado', 'cancelado'];
 const textoEstado = `El estado debe ser uno de: ${ESTADOS.join(', ')}`;
@@ -87,4 +88,13 @@ async function descargarPdf(req, res) {
   res.download(ruta, nombre);
 }
 
-module.exports = { crear, listar, obtener, actualizar, cambiarEstado, eliminar, trabajos, reenviar, descargarPdf };
+/** POST /pedidos/:id/pagar  (pago en línea simulado; encola el trabajo de pago) */
+async function pagar(req, res) {
+  res.status(202).json(await pagosService.iniciarPago(req.user, parseId(req.params.id)));
+}
+
+module.exports = {
+  crear, listar, obtener, actualizar, cambiarEstado, eliminar, trabajos, reenviar, descargarPdf,
+  pagar,
+};
+

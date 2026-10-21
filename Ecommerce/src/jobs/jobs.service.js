@@ -1,7 +1,13 @@
 const pool = require('../config/db');
 const { HttpError } = require('../common/errors');
 const { esAdmin } = require('../common/roles');
-const { colas } = require('../queues/queues');
+
+// 1. Importa asignando alias a cada objeto de colas
+const { colas: colasPedido } = require('../queues/queues');
+const { colas: colasPago } = require('../pagos/pagos.queue');
+
+// 2. Unifica ambos objetos en una sola constante llamada "colas"
+const colas = { ...colasPedido, ...colasPago }; // pdf-ordenes, correos + pagos, facturas, correos-factura
 
 /** Estado de un trabajo: lo guardado en BD + lo que dice BullMQ en vivo (si todavía lo conserva). */
 async function obtenerEstado(user, nombreCola, jobId) {
@@ -12,12 +18,14 @@ async function obtenerEstado(user, nombreCola, jobId) {
      WHERE t.cola = ? AND t.job_id = ? LIMIT 1`,
     [nombreCola, jobId]
   );
+
   const fila = rows[0];
   // Un cliente solo ve los trabajos de sus propios pedidos
   if (!fila || (!esAdmin(user) && Number(fila.id_usuario) !== user.id)) {
     throw new HttpError(404, 'NOT_FOUND', 'Trabajo no encontrado');
   }
 
+  // Ahora "colas" existe y contiene tanto colasPedido como colasPago
   const job = await colas[nombreCola]?.getJob(jobId);
   return {
     id: jobId,

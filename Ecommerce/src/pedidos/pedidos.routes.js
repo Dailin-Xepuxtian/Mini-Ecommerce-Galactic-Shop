@@ -19,4 +19,8 @@ router.get('/:id/trabajos', asyncHandler(c.trabajos));
 router.post('/:id/reenviar', asyncHandler(c.reenviar));
 router.get('/:id/pdf', asyncHandler(c.descargarPdf));
 
+
+// Pago en línea
+router.post('/:id/pagar', asyncHandler(c.pagar));
+
 module.exports = router;

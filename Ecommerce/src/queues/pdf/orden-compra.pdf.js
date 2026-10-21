@@ -2,76 +2,142 @@ const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const { numeroOrden, moneda } = require('../../common/formato');
 
-function encabezadoTabla(doc, y) {
-  doc.rect(50, y - 4, 512, 20).fill('#1f2937');
-  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9);
-  doc.text('Código', 56, y, { width: 70 });
-  doc.text('Producto', 130, y, { width: 210 });
-  doc.text('Cant.', 345, y, { width: 45, align: 'right' });
-  doc.text('P. unitario', 390, y, { width: 80, align: 'right' });
-  doc.text('Subtotal', 470, y, { width: 88, align: 'right' });
-  doc.fillColor('#000000').font('Helvetica').fontSize(9);
-  return y + 24;
-}
-
-/** Genera el PDF de la orden de compra en `destino`. `pedido` = resultado de obtenerPedidoCompleto(). */
+/**
+ * Genera el PDF de la orden de compra
+ */
 function generarPdf(pedido, destino) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
+    const doc = new PDFDocument({ size: 'LETTER', margin: 40 });
     const stream = fs.createWriteStream(destino);
+
     stream.on('finish', resolve);
     stream.on('error', reject);
     doc.on('error', reject);
     doc.pipe(stream);
 
-    // Encabezado
-    doc.font('Helvetica-Bold').fontSize(20).fillColor('#000000').text('Galacticos S.A.', 50, 50);
-    doc.font('Helvetica').fontSize(10).fillColor('#6b7280').text('Orden de compra', 50, 76);
-    doc.font('Helvetica-Bold').fontSize(16).fillColor('#000000');
-    doc.text(numeroOrden(pedido.id_pedido), 350, 50, { width: 212, align: 'right' });
-    doc.font('Helvetica').fontSize(10);
-    doc.text(`Fecha: ${pedido.creado_en}`, 350, 74, { width: 212, align: 'right' });
-    doc.text(`Estado: ${pedido.estado}`, 350, 88, { width: 212, align: 'right' });
+    const anchoPagina = 532; // 612 - (40 * 2)
+    const startX = 40;
 
-    doc.moveTo(50, 110).lineTo(562, 110).strokeColor('#d1d5db').lineWidth(1).stroke();
+   
+    doc.rect(startX, 40, anchoPagina, 60).fill('#1b0354');
+    
+    // Título "Gracias por su orden" 
+    doc.fillColor('#ffffff')
+       .font('Helvetica-Bold')
+       .fontSize(20)
+       .text('Gracias por su orden', startX + 20, 52);
 
-    // Cliente
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#000000').text('Cliente', 50, 122);
-    doc.font('Helvetica');
-    doc.text(`${pedido.nombres} ${pedido.apellidos}`.trim(), 50, 137);
-    doc.text(pedido.email, 50, 151);
+    doc.fillColor('#84cc16')
+       .font('Helvetica-Bold')
+       .fontSize(11)
+       .text('Galacticos Shop', startX + 20, 76);
 
-    // Detalle
-    let y = encabezadoTabla(doc, 185);
-    for (const it of pedido.items) {
-      if (y > 700) {
-        doc.addPage();
-        y = encabezadoTabla(doc, 50);
-      }
-      doc.text(it.codigo, 56, y, { width: 70, height: 12, ellipsis: true });
-      doc.text(it.nombre, 130, y, { width: 210, height: 12, ellipsis: true });
-      doc.text(String(it.cantidad), 345, y, { width: 45, align: 'right' });
-      doc.text(moneda(it.precio_unitario), 390, y, { width: 80, align: 'right' });
-      doc.text(moneda(it.subtotal), 470, y, { width: 88, align: 'right' });
-      y += 18;
-      doc.moveTo(50, y - 4).lineTo(562, y - 4).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+    // --- 2. MENSAJE Y DATOS DEL CLIENTE ---
+    doc.fillColor('#333333').font('Helvetica').fontSize(10.5);
+    
+    let y = 120;
+    const nombreCliente = `${pedido.nombres || ''} ${pedido.apellidos || ''}`.trim() || 'Cliente';
+    doc.text(`Hola ${nombreCliente},`, startX, y);
+    
+    y += 18;
+    doc.text(`Hemos recibido su orden ${numeroOrden(pedido.id_pedido)}, el estado actual es: ${pedido.estado}.`, startX, y, {
+      width: anchoPagina,
+      lineGap: 4
+    });
+
+    // Subtítulo de la Orden en Púrpura
+    y += 35;
+    doc.fillColor('#4c1d95')
+       .font('Helvetica-Bold')
+       .fontSize(11)
+       .text(`[${numeroOrden(pedido.id_pedido)}] (${pedido.creado_en})`, startX, y);
+
+    // --- 3. TABLA DE PRODUCTOS ---
+    y += 20;
+    const colProductoX = startX;
+    const colProductoW = 280;
+    const colCantidadX = startX + 280;
+    const colCantidadW = 80;
+    const colPrecioX = startX + 360;
+    const colPrecioW = 152;
+
+    // Encabezado de la tabla
+    function dibujarEncabezadoTabla(currY) {
+      doc.rect(startX, currY, anchoPagina, 25).fill('#24045f');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10);
+      doc.text('Producto', colProductoX + 10, currY + 7, { width: colProductoW - 10 });
+      doc.text('Cantidad', colCantidadX, currY + 7, { width: colCantidadW, align: 'center' });
+      doc.text('Precio', colPrecioX, currY + 7, { width: colPrecioW - 10, align: 'right' });
+      return currY + 25;
     }
 
-    // Total
-    if (y > 690) {
+    y = dibujarEncabezadoTabla(y);
+
+    // Filas de productos
+    doc.font('Helvetica').fontSize(9.5);
+    
+    for (const item of pedido.items) {
+      if (y > 680) {
+        doc.addPage();
+        y = 50;
+        y = dibujarEncabezadoTabla(y);
+      }
+
+      const textoProducto = `${item.nombre}\n(#${item.codigo})`;
+      const altoTexto = doc.heightOfString(textoProducto, { width: colProductoW - 20 });
+      const altoFila = Math.max(altoTexto + 16, 35);
+
+      // Bordes de celdas
+      doc.rect(startX, y, anchoPagina, altoFila).lineWidth(0.5).strokeColor('#d1d5db').stroke();
+
+      // Contenido de la fila
+      doc.fillColor('#374151');
+      doc.text(textoProducto, colProductoX + 10, y + 8, { width: colProductoW - 20 });
+      doc.text(String(item.cantidad), colCantidadX, y + 8, { width: colCantidadW, align: 'center' });
+      doc.text(moneda(item.subtotal), colPrecioX, y + 8, { width: colPrecioW - 10, align: 'right' });
+
+      y += altoFila;
+    }
+
+    // Fila del TOTAL
+    if (y > 700) {
       doc.addPage();
       y = 50;
     }
-    y += 8;
-    doc.font('Helvetica-Bold').fontSize(12).fillColor('#000000');
-    doc.text('TOTAL', 345, y, { width: 120, align: 'right' });
-    doc.text(moneda(pedido.total), 470, y, { width: 88, align: 'right' });
 
+    doc.rect(startX, y, anchoPagina, 28).lineWidth(0.5).strokeColor('#d1d5db').stroke();
+    doc.fillColor('#1b0354').font('Helvetica-Bold').fontSize(10);
+    doc.text('Total:', colProductoX + 10, y + 8, { width: colProductoW + colCantidadW - 10 });
+    doc.text(moneda(pedido.total), colPrecioX, y + 8, { width: colPrecioW - 10, align: 'right' });
+
+    y += 40;
+
+    // --- 4. OBSERVACIONES (Si existen) ---
     if (pedido.observaciones) {
-      y += 36;
-      doc.font('Helvetica-Bold').fontSize(10).text('Observaciones', 50, y);
-      doc.font('Helvetica').text(pedido.observaciones, 50, y + 14, { width: 512 });
+      if (y > 700) {
+        doc.addPage();
+        y = 50;
+      }
+      doc.fillColor('#1b0354').font('Helvetica-Bold').fontSize(10).text('Observaciones:', startX, y);
+      doc.font('Helvetica').fontSize(9.5).fillColor('#4b5563').text(pedido.observaciones, startX, y + 14, { width: anchoPagina });
+      y += 40;
     }
+
+    // --- 5. MENSAJE FINAL Y PIE DE PÁGINA ---
+    if (y > 710) {
+      doc.addPage();
+      y = 50;
+    }
+
+    doc.fillColor('#4b5563').font('Helvetica').fontSize(10);
+    doc.text('Gracias por confiar en nosotros, somos Galacticos Shop.', startX, y);
+
+    // Pie de página con el fondo morado oscuro
+    doc.rect(startX, 730, anchoPagina, 30).fill('#1b0354');
+    doc.fillColor('#ffffff')
+       .font('Helvetica-Bold')
+       .fontSize(9)
+       .text('GALACTICOS SHOP · Redes y cómputo', startX, 741, { width: anchoPagina, align: 'center' });
 
     doc.end();
   });

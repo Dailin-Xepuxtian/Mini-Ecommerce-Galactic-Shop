@@ -9,7 +9,7 @@ app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({
-    arquitectura: 'Monolito Modular',
+    arquitectura: 'Monolito Modular Galacticos proyecto',
     mensaje: 'Una sola aplicación Node.js con módulos internos',
     puerto: 3000,
     version: '2.0.0',
