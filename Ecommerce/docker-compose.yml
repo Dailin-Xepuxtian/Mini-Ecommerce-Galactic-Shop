@@ -70,6 +70,7 @@ services:
 
   api:
     <<: *app
+    command: ["node", "src/app.js"]
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
@@ -97,13 +98,15 @@ services:
       mailpit:
         condition: service_started
 
-  # --- Frontend (React): se agrega cuando lo construyamos ---
+
   # frontend:
   #   build: ./frontend
   #   ports:
   #     - "5173:80"
   #   depends_on:
   #     - api
+  # #   volumes:
+  # #    - ./frontend/public/productos:/app/public/productos
 
 volumes:
   mysql_data:

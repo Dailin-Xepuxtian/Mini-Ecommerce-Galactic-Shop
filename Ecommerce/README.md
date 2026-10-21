@@ -28,15 +28,29 @@ cd <nombre-de-la-carpeta>
 
 ### 2. Instalar dependencias
 ```bash 
+##Nota para "npm" install: se debe ejcutar en carpeta de backend y tambien de frontend
 Node.js (versión LTS recomendada):** Necesario para la gestión de dependencias locales (`npm install`)
 npm i express mysql2 zod jsonwebtoken dotenv helmet cors
 npm i bcryptjs express-rate-limit
 npm i bullmq pdfkit nodemailer
 npm i ioredis
+
+##Ejecutar en la terminal dentro de carpeta ecommerce
 docker compose up -d --build
 
+##Ejecutar dentro de carpeta frontend
+npm run dev
 
-## Endpoints
+##URL para sitio web
+http://localhost:5173/
+
+##Para  Mailpit (correos)
+http://localhost:8025/
+
+##Para ver errores
+docker compose logs api --tail 40
+
+## Endpoints (AUN PENDIENTES DE AGREGAR)
 ```text
 GET  http://localhost:3000/
 GET  http://localhost:3000/api/usuarios
@@ -72,10 +86,6 @@ docker run -d -p 6379:6379 redis:7
 docker run -d -p 1025:1025 -p 8025:8025 axllent/mailpit
 
 Corre dos procesos: node src/app.js (la API) y npm run worker.
-
-##Instala los iconos
-npm i lucide-react
-
 
 
 
