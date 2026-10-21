@@ -200,17 +200,65 @@ CREATE TABLE IF NOT EXISTS `detalle_ventas` (
     CONSTRAINT `fk_dv_productos` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 14. PAGOS
-CREATE TABLE IF NOT EXISTS `pagos` (
-    `id_pago` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `id_venta` INT UNSIGNED NOT NULL,
-    `metodo_pago` ENUM('efectivo', 'tarjeta_credito', 'tarjeta_debito', 'transferencia', 'deposito', 'cheque') NOT NULL,
-    `monto` DECIMAL(12,2) UNSIGNED NOT NULL,
-    `no_referencia` VARCHAR(100) NULL COMMENT 'No. Transacción, voucher o no. boleta depósito',
-    `banco` VARCHAR(100) NULL,
-    `estado_pago` ENUM('pendiente', 'verificado', 'rechazado') DEFAULT 'verificado',
-    `fecha_pago` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT `fk_pagos_ventas` FOREIGN KEY (`id_venta`) REFERENCES `ventas` (`id_venta`) ON DELETE CASCADE ON UPDATE CASCADE
+
+
+
+CREATE TABLE IF NOT EXISTS pedidos (
+  id_pedido INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id_usuario INT UNSIGNED NOT NULL,
+  estado ENUM('pendiente','confirmado','enviado','entregado','cancelado') NOT NULL DEFAULT 'pendiente',
+  total DECIMAL(12,2) UNSIGNED NOT NULL DEFAULT 0,
+  observaciones VARCHAR(500) NULL,
+  pdf_archivo VARCHAR(100) NULL,
+  creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_pedidos_usuario (id_usuario),
+  INDEX idx_pedidos_estado (estado),
+  CONSTRAINT fk_pedidos_usuario FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pedido_detalle (
+  id_detalle INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id_pedido INT UNSIGNED NOT NULL,
+  id_producto INT UNSIGNED NOT NULL,
+  codigo VARCHAR(50) NOT NULL,
+  nombre VARCHAR(200) NOT NULL,
+  cantidad INT UNSIGNED NOT NULL,
+  precio_unitario DECIMAL(12,2) UNSIGNED NOT NULL,
+  subtotal DECIMAL(12,2) UNSIGNED NOT NULL,
+  INDEX idx_detalle_pedido (id_pedido),
+  INDEX idx_detalle_producto (id_producto),
+  CONSTRAINT fk_detalle_pedido FOREIGN KEY (id_pedido) REFERENCES pedidos (id_pedido) ON DELETE CASCADE,
+  CONSTRAINT fk_detalle_producto FOREIGN KEY (id_producto) REFERENCES productos (id_producto)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pedido_trabajos (
+  id_trabajo BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id_pedido INT UNSIGNED NOT NULL,
+  cola VARCHAR(40) NOT NULL,
+  job_id VARCHAR(64) NOT NULL,
+  tipo ENUM('pdf','correo') NOT NULL,
+  estado ENUM('en_cola','procesando','reintentando','completado','fallido') NOT NULL DEFAULT 'en_cola',
+  intentos INT UNSIGNED NOT NULL DEFAULT 0,
+  error VARCHAR(500) NULL,
+  creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_trabajos_pedido (id_pedido),
+  INDEX idx_trabajos_job (cola, job_id),
+  CONSTRAINT fk_trabajos_pedido FOREIGN KEY (id_pedido) REFERENCES pedidos (id_pedido) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pedido_pagos (
+  id_pago INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  id_pedido INT UNSIGNED NOT NULL,
+  metodo VARCHAR(20) NOT NULL DEFAULT 'en_linea',
+  monto DECIMAL(12,2) UNSIGNED NOT NULL,
+  estado ENUM('procesando','aprobado','rechazado','reembolsado') NOT NULL DEFAULT 'procesando',
+  referencia VARCHAR(40) NULL,
+  motivo VARCHAR(200) NULL,
+  creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_pagos_pedido (id_pedido),
+  CONSTRAINT fk_pagos_pedido FOREIGN KEY (id_pedido) REFERENCES pedidos (id_pedido) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -244,10 +292,11 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- 1. roles
 -- ------------------------------------------------------------------------------
 INSERT INTO `roles` (`id_rol`, `nombre_rol`, `descripcion`) VALUES
-(1, 'Administrador General', 'Acceso total y configuración global del sistema'),
+(1, 'Administrador', 'Acceso total y configuración global del sistema'),
 (2, 'Asesor de Ventas', 'Gestión de órdenes de compra, clientes y registro de ventas'),
 (3, 'Encargado de Bodega', 'Control de existencias, recepción y despacho de mercancía'),
-(4, 'Supervisora de Operaciones', 'Auditoría, reportes y control de calidad');
+(4, 'Supervisora de Operaciones', 'Auditoría, reportes y control de calidad'),
+(5, 'Cliente', 'Comprador');
 
 
 -- 2. usuarios (contraseña de todos: Manager1)
